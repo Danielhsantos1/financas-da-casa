@@ -174,7 +174,7 @@ function render(){
       cs.forEach(c=>{const l=lk(c,ym),p=l&&l.pago,lt=late(c,ym);
         h+=`<div class="row ${p?'paid':''} ${lt?'late':''}" data-id="${esc(c._id)}">
           <div class="chk" data-chk="1">${p?'✓':''}</div>
-          <div class="info" data-edit="1"><div>${esc(c.nome)}</div><small>${lt?'ATRASADO':p?'pago':(c.dia?'vence dia '+c.dia:'pendente')}</small></div>
+          <div class="info" data-edit="1"><div>${esc(c.nome)}</div><small>${lt?'ATRASADO':p?(typeof l.pago==='string'?'pago por '+esc(l.pago):'pago'):(c.dia?'vence dia '+c.dia:'pendente')}</small></div>
           <div class="val" data-edit="1">${R(valor(c,ym))}</div></div>`});
       h+='</div>';
     }
@@ -223,9 +223,19 @@ const num=v=>{const n=parseFloat(String(v).replace(',','.'));return isNaN(n)?0:n
 const safe=async f=>{try{await f()}catch(e){alert2('Não consegui salvar. Você tem permissão de edição neste app?')}};
 function alert2(t){const m=modal(`<h3>Ops</h3><p>${esc(t)}</p><div class="btns"><button class="sec" id="ok">OK</button></div>`);m.querySelector('#ok').onclick=()=>m.remove()}
 
-async function togglePago(c){
+async function gravarPago(c,quem){
   const l=lk(c,ym)||{};
-  await safe(()=>C.lanc.doc(c._id+'_'+ym).set({conta:c._id,ym,pago:!l.pago,valor:l.valor!=null?l.valor:null}));
+  await safe(()=>C.lanc.doc(c._id+'_'+ym).set({conta:c._id,ym,pago:quem,valor:l.valor!=null?l.valor:null}));
+}
+function togglePago(c){
+  const l=lk(c,ym)||{};
+  if(l.pago)return gravarPago(c,false); // ja estava pago: desmarca
+  const m=modal(`<h3>Quem pagou?</h3><p class="tip" style="margin:0 0 4px">${esc(c.nome)} · ${esc(R(valor(c,ym)))}</p>
+    <div class="btns"><button id="q1">Daniel</button><button id="q2">Suélen</button></div>
+    <div class="btns"><button class="sec" id="x">Cancelar</button></div>`);
+  m.querySelector('#q1').onclick=()=>{m.remove();gravarPago(c,'Daniel')};
+  m.querySelector('#q2').onclick=()=>{m.remove();gravarPago(c,'Suélen')};
+  m.querySelector('#x').onclick=()=>m.remove();
 }
 function editLanc(c){
   const l=lk(c,ym)||{};
@@ -234,7 +244,7 @@ function editLanc(c){
     <div class="btns"><button class="sec" id="x">Cancelar</button><button id="s">Salvar</button></div>
     <div class="btns"><button class="del" id="z">Não tem esta conta neste mês</button></div>`);
   m.querySelector('#x').onclick=()=>m.remove();
-  m.querySelector('#s').onclick=async()=>{await safe(()=>C.lanc.doc(c._id+'_'+ym).set({conta:c._id,ym,pago:!!l.pago,valor:num(m.querySelector('#v').value)}));m.remove()};
+  m.querySelector('#s').onclick=async()=>{await safe(()=>C.lanc.doc(c._id+'_'+ym).set({conta:c._id,ym,pago:l.pago||false,valor:num(m.querySelector('#v').value)}));m.remove()};
   m.querySelector('#z').onclick=async()=>{await safe(()=>C.lanc.doc(c._id+'_'+ym).set({conta:c._id,ym,pago:false,valor:0}));m.remove()};
 }
 function editEntrada(){
