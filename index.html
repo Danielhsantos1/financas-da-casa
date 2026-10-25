@@ -156,7 +156,7 @@ const late=(c,m)=>{const l=lk(c,m);if(l&&l.pago)return false;if(m<hojeYM)return 
 
 function render(){
   $('#mes').textContent=mlabel(ym);
-  $('#fab').style.display=(tab==='vars'||tab==='cad')?'block':'none';
+  $('#fab').style.display=(tab==='contas'||tab==='vars'||tab==='cad')?'block':'none';
   const t=totais(ym);
   let h='';
   if(tab==='contas'){
@@ -274,22 +274,35 @@ function formVar(v){
     const mm=o.data.slice(0,7);if(mm!==ym){ym=mm}m.remove();render()};
   if(v)m.querySelector('#z').onclick=async()=>{await safe(()=>C.var.doc(v._id).delete());m.remove()};
 }
+function nParcelas(c){if(!c||!c.ate)return 12;const [y1,m1]=c.de.split('-').map(Number),[y2,m2]=c.ate.split('-').map(Number);return (y2-y1)*12+(m2-m1)+1}
 function formConta(c){
-  const m=modal(`<h3>${c?'Editar conta fixa':'Nova conta fixa'}</h3>
-    <label>Nome</label><input id="n" value="${esc(c?c.nome:'')}">
+  const parc=!!(c&&c.ate);
+  const m=modal(`<h3>${c?'Editar conta':'Nova conta'}</h3>
+    <label>Nome</label><input id="n" value="${esc(c?c.nome:'')}" placeholder="Ex: Geladeira, Internet...">
     <label>Valor mensal (R$)</label><input id="v" inputmode="decimal" value="${c?c.valor:''}">
     <label>Tipo</label><select id="t"><option value="pagamento" ${c&&c.tipo==='pagamento'?'selected':''}>Pagamento</option><option value="vale" ${c&&c.tipo==='vale'?'selected':''}>Vale / Outros</option></select>
+    <label>Como se repete?</label><select id="rep"><option value="fixa" ${parc?'':'selected'}>Todo mês, sem data para acabar</option><option value="parc" ${parc?'selected':''}>Parcelada (tem fim)</option></select>
     <label>Começa em</label><input id="de" type="month" value="${c?c.de:ym}">
-    <label>Termina em (vazio = sem fim)</label><input id="ate" type="month" value="${c&&c.ate?c.ate:''}">
+    <div id="pbox" style="display:${parc?'block':'none'}">
+      <label>Quantas parcelas (meses)?</label><input id="np" type="number" min="1" max="120" inputmode="numeric" value="${nParcelas(c)}">
+      <p class="tip" id="ult" style="margin:6px 0 0"></p>
+    </div>
     <label>Dia do vencimento (opcional)</label><input id="dia" type="number" min="1" max="31" value="${c&&c.dia?c.dia:''}">
     <div class="btns"><button class="sec" id="x">Cancelar</button><button id="s">Salvar</button></div>
     ${c?'<div class="btns"><button class="del" id="z">Apagar conta</button></div>':''}`);
-  m.querySelector('#x').onclick=()=>m.remove();
-  m.querySelector('#s').onclick=async()=>{
-    const o={nome:m.querySelector('#n').value.trim()||'Conta',valor:num(m.querySelector('#v').value),tipo:m.querySelector('#t').value,de:m.querySelector('#de').value||ym,ate:m.querySelector('#ate').value||null,dia:parseInt(m.querySelector('#dia').value)||null};
+  const q=i=>m.querySelector(i);
+  const calc=()=>{const de=q('#de').value||ym,n=Math.max(1,parseInt(q('#np').value)||1);return addM(de,n-1)};
+  const att=()=>{q('#pbox').style.display=q('#rep').value==='parc'?'block':'none';q('#ult').textContent='Aparece de '+mshort(q('#de').value||ym)+' até '+mshort(calc())+' ('+(parseInt(q('#np').value)||1)+' parcelas)'};
+  ['#rep','#de','#np'].forEach(i=>{q(i).addEventListener('input',att);q(i).addEventListener('change',att)});att();
+  q('#x').onclick=()=>m.remove();
+  q('#s').onclick=async()=>{
+    const de=q('#de').value||ym;
+    const o={nome:q('#n').value.trim()||'Conta',valor:num(q('#v').value),tipo:q('#t').value,de,ate:q('#rep').value==='parc'?calc():null,dia:parseInt(q('#dia').value)||null};
     const id=c?c._id:'c'+Date.now().toString(36);
-    await safe(()=>C.contas.doc(id).set(o));m.remove()};
-  if(c)m.querySelector('#z').onclick=async()=>{await safe(()=>C.contas.doc(c._id).delete());m.remove()};
+    await safe(()=>C.contas.doc(id).set(o));
+    if(!c&&de!==ym){ym=de}   // vai para o mes onde a conta comeca
+    m.remove();render()};
+  if(c)q('#z').onclick=async()=>{await safe(()=>C.contas.doc(c._id).delete());m.remove()};
 }
 
 async function exportar(){
