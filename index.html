@@ -95,29 +95,43 @@ let KEY='';
 try{const h=new URLSearchParams((location.hash||'').slice(1));if(h.get('k')){localStorage.setItem('fc_key',h.get('k'));history.replaceState(null,'',location.pathname+location.search)}KEY=localStorage.getItem('fc_key')||''}catch(e){}
 function sheetsDb(url,tok){
   const tabs={contas:'contas',lanc:'lanc',var:'gastos',entradas:'entradas'};
-  const state={},subs={};let pend=0;
+  const state={},subs={};let pend=0,carregou=false;
   const emit=n=>(subs[n]||[]).forEach(cb=>cb({docs:Object.entries(state[n]||{}).map(([id,v])=>({id,data:()=>v}))}));
-  async function load(){
-    if(pend>0)return;
-    const r=await fetch(url+'?t='+encodeURIComponent(tok));const j=await r.json();
+  const aplicar=j=>{for(const [k,t] of Object.entries(tabs)){const m={};(j[t]||[]).forEach(row=>{const {id,...rest}=row;m[id]=rest});state[k]=m;emit(k)}carregou=true};
+  const eq=(a,b)=>(a==null||a==='')?(b==null||b===''):(a==b);
+  async function buscar(){
+    const r=await fetch(url+'?t='+encodeURIComponent(tok));
+    const j=await r.json();
     if(j.erro)throw new Error(j.erro);
-    for(const [k,t] of Object.entries(tabs)){const m={};(j[t]||[]).forEach(row=>{const {id,...rest}=row;m[id]=rest});state[k]=m;emit(k)}
+    try{localStorage.setItem('fc_cache',JSON.stringify(j))}catch(e){}
+    return j;
   }
-  async function post(tab,op,id,data){
+  // mostra na hora os dados da ultima visita, enquanto a planilha responde
+  function doCache(){try{const j=JSON.parse(localStorage.getItem('fc_cache')||'null');if(j){aplicar(j);return true}}catch(e){}return false}
+  async function load(){ if(pend>0)return; aplicar(await buscar()); }
+  async function post(n,op,id,data){
     pend++;
-    try{const r=await fetch(url,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({t:tok,tab,op,id,data})});const j=await r.json();if(j.erro)throw new Error(j.erro)}
-    finally{pend--}
+    try{
+      // O Google executa a gravacao mas responde de um jeito que o navegador bloqueia a leitura.
+      // Por isso enviamos sem ler a resposta e conferimos na planilha se gravou.
+      await fetch(url,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify({t:tok,tab:tabs[n],op,id,data})});
+      const j=await buscar();
+      const linhas=(j[tabs[n]]||[]);const lin=linhas.find(r=>String(r.id)===String(id));
+      if(op==='delete'){ if(lin)throw new Error('a planilha ainda tem esse item'); }
+      else{ if(!lin)throw new Error('a planilha não recebeu o item'); for(const k of Object.keys(data||{})){ if(!eq(lin[k],data[k]))throw new Error('a planilha guardou "'+k+'" diferente'); } }
+      aplicar(j);
+    } finally { pend--; }
   }
   const coll=n=>({
-    onSnapshot(cb){(subs[n]=subs[n]||[]).push(cb);if(state[n])emit(n)},
+    onSnapshot(cb){(subs[n]=subs[n]||[]).push(cb);if(carregou)emit(n)},
     doc:id=>({
       async set(data){state[n]=state[n]||{};const prev=state[n][id];state[n][id]=data;emit(n);
-        try{await post(tabs[n],'upsert',id,data)}catch(e){if(prev)state[n][id]=prev;else delete state[n][id];emit(n);throw e}},
+        try{await post(n,'upsert',id,data)}catch(e){if(prev)state[n][id]=prev;else delete state[n][id];emit(n);throw e}},
       async delete(){const prev=(state[n]||{})[id];if(state[n])delete state[n][id];emit(n);
-        try{await post(tabs[n],'delete',id)}catch(e){if(prev){state[n][id]=prev;emit(n)}throw e}}
+        try{await post(n,'delete',id)}catch(e){if(prev){state[n][id]=prev;emit(n)}throw e}}
     })
   });
-  return {collection:coll,load};
+  return {collection:coll,load,doCache};
 }
 function pedirChave(){
   const m=modal(`<h3>Chave de acesso</h3><p class="tip" style="margin:0 0 8px">Cole a chave que o Daniel mandou.</p><input id="k" placeholder="chave">
@@ -134,6 +148,8 @@ async function init(){
   C.lanc.onSnapshot(s=>{lanc={};rows(s).forEach(r=>lanc[r._id]=r);render()});
   C.var.onSnapshot(s=>{vars=rows(s);render()});
   C.entradas.onSnapshot(s=>{entradas={};rows(s).forEach(r=>entradas[r._id]=r);render()});
+  const tinhaCache=db.doCache();
+  if(!tinhaCache){off.style.display='block';off.textContent='Carregando seus dados...'}
   try{await db.load();off.style.display='none'}
   catch(e){off.style.display='block';off.textContent='Não consegui ler a planilha ('+e.message+'). Confira a chave e a internet.';if(/negado/.test(e.message)){try{localStorage.removeItem('fc_key')}catch(_){}KEY='';pedirChave()}return}
   setInterval(()=>{db.load().catch(()=>{})},15000);
@@ -220,7 +236,7 @@ function render(){
 function modal(html){const m=document.createElement('div');m.className='modal';m.innerHTML='<div class="sheet">'+html+'</div>';
   m.addEventListener('click',e=>{if(e.target===m)m.remove()});document.body.appendChild(m);return m}
 const num=v=>{const n=parseFloat(String(v).replace(',','.'));return isNaN(n)?0:n};
-const safe=async f=>{try{await f()}catch(e){alert2('Não consegui salvar. Você tem permissão de edição neste app?')}};
+const safe=async f=>{try{await f()}catch(e){alert2('Não consegui salvar: '+((e&&e.message)||'erro desconhecido')+'. Se continuar, me mande uma captura desta tela.')}};
 function alert2(t){const m=modal(`<h3>Ops</h3><p>${esc(t)}</p><div class="btns"><button class="sec" id="ok">OK</button></div>`);m.querySelector('#ok').onclick=()=>m.remove()}
 
 async function gravarPago(c,quem){
